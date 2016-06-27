@@ -7,25 +7,28 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.Socket;
 import java.net.UnknownHostException;
+import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.LinkedBlockingQueue;
+
+import fang.util.CloseableInterface;
+import fang.util.StringMsgHandler;
 
 public class TCPClient {
 	String ipAddress=null;
 	int mPORT=0;
 	Socket mSocket = null;
-	Queue<String> MsgSendingQueue = null,MsgReceiveQueue =null;
 	boolean isConnected = false;
-	TCPClientReceiveThread receiveThread = null;
-	TCPClientSendThread sendThread=null;
+	List<CloseableInterface> ThreadList = new LinkedList<CloseableInterface>();
+	ReadThread readThread = null;WriteThread writeThread = null;
 	
-	public TCPClient() {
-		MsgSendingQueue = new LinkedBlockingQueue<String>();
+	public  TCPClient(Socket socket) {
+		mSocket = socket;
 	}
 	
 	public TCPClient(String ip,int PORT) {
 		setIpAddress(ip);setPORT(PORT);
-		MsgSendingQueue = new LinkedBlockingQueue<String>();
 	}
 	
 	public void setIpAddress(String ipAddress) {
@@ -36,16 +39,32 @@ public class TCPClient {
 		mPORT = PORT;
 	}
 	
+	public boolean isConnected() {
+		return isConnected;
+	}
+	
+	public void reConnect(){
+		if(ipAddress != null || mPORT !=0){
+			close();
+			connect();
+		}
+	}
+	
+	public void setConnected(boolean isConnected) {
+		this.isConnected = isConnected;
+	}
+	
 	public boolean connect(){
 		boolean conResult = false;
 		if(ipAddress != null){
 			//connect
 			try {
 				mSocket = new Socket(ipAddress, mPORT);
-				sendThread = new TCPClientSendThread(MsgSendingQueue, mSocket.getOutputStream());
-				receiveThread = new TCPClientReceiveThread(mSocket.getInputStream());
-				sendThread.start();receiveThread.start();
-				isConnected = true;
+				writeThread = new WriteThread(mSocket.getOutputStream());
+				readThread = new ReadThread(mSocket.getInputStream());
+				ThreadList.add(readThread);ThreadList.add(writeThread);
+				readThread.start();writeThread.start();
+				setConnected(true);
 			} catch (UnknownHostException e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
@@ -68,17 +87,27 @@ public class TCPClient {
 		return connect();
 	}
 	
+	private void closeAllResource() {
+		for (CloseableInterface closeableInterface : ThreadList) {
+			closeableInterface.close();
+		}
+	}
+	
 	/**
 	 * close the connect to the server
 	 */
 	public void close(){
-		if(mSocket != null && mSocket.isClosed())
+		//1.kill all the thread associated with TCPClient Object
+		closeAllResource();
+		//2.close socket
+		if(mSocket != null && !mSocket.isClosed())
 			try {
 				mSocket.close();
 			} catch (IOException e) {
 				e.printStackTrace();
 			}
-		isConnected = false;
+		//3.modify the connect status
+		setConnected(false);
 	}
 	
 	/**
@@ -86,39 +115,40 @@ public class TCPClient {
 	 * @param data
 	 */
 	public void send(String data) {
-		if(!isConnected){
-			System.out.println("client hasn't connect to server");
-			return;
-		}
-		synchronized (MsgSendingQueue) {
-			MsgSendingQueue.add(data);
-			MsgSendingQueue.notifyAll();
-		}
+		if(writeThread.isAlive())
+			writeThread.send(data);
 	}
 	
 	public void sendLine(String data) {
 		String newdata = data+"\r\n";
 		send(newdata);
 	}
-	
 }
 
-class TCPClientSendThread extends Thread{
-	Queue<String> MsgSendingQueue = null;
+class WriteThread extends Thread implements CloseableInterface{
+	Queue<String> MsgSendingQueue = new LinkedBlockingQueue<>(255);
 	OutputStream outputStream;
 	volatile boolean stop=false;
 	
-	public TCPClientSendThread(Queue<String>sending,OutputStream out) {
-		MsgSendingQueue = sending;
+	public WriteThread(OutputStream out) {
 		outputStream = out;
 	}
 	
-	public void killSelf() {
+	public void send(String msg) {
+		synchronized (MsgSendingQueue) {
+			MsgSendingQueue.add(msg);
+			MsgSendingQueue.notifyAll();
+		}
+	}
+	
+	@Override
+	public void close() {
 		stop = true;
 	}
 	
 	@Override
 	public void run() {
+		stop = false;
 		while(!stop){
 			synchronized (MsgSendingQueue) {
 				try{
@@ -128,7 +158,7 @@ class TCPClientSendThread extends Thread{
 					outputStream.write(MsgSendingQueue.remove().getBytes());
 				}
 				}catch(Exception e){
-					e.printStackTrace();
+					this.close();
 					break;
 				}
 			}
@@ -142,27 +172,43 @@ class TCPClientSendThread extends Thread{
  * @author fang
  *
  */
-class TCPClientReceiveThread extends Thread{
+class ReadThread extends Thread implements CloseableInterface{
 	InputStream inputStream=null;
 	volatile boolean stop=false;
+	StringMsgHandler mMsgHandler = null;
 	
-	public TCPClientReceiveThread(InputStream in) {
+	public ReadThread(InputStream in) {
 		inputStream = in;
 	}
 	
-	public void killSelf() {
+	public void setMsgHandler(StringMsgHandler msgHandler) {
+		mMsgHandler = msgHandler;
+	}
+	
+	@Override
+	public void close() {
 		stop = true;
 	}
 	
 	@Override
 	public void run() {
+		stop = false;
 		BufferedReader bf=new BufferedReader(new InputStreamReader(inputStream));
 		while(!stop){
 			try {
+				if(bf == null){
+					System.err.println("buffer reader is null");
+					break;
+				}
 				String msg = bf.readLine();
-				System.out.println(msg);//display the msg
+				if(mMsgHandler != null){
+					mMsgHandler.HandleStringMsg(msg);
+				}else{
+					if(msg !=null && !msg.isEmpty())
+						System.out.println(msg);//display the msg
+				}
 			} catch (IOException e) {
-				e.printStackTrace();
+				stop = true;
 			}
 		}
 	}
