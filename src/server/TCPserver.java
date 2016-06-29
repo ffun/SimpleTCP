@@ -1,60 +1,65 @@
 package server;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.LinkedList;
+import java.util.List;
 
-public class TCPserver implements Runnable{
-	Socket mSocket = null;
-	ServerSocket serverSocket=null;
-	int mPort = 0;
-	volatile boolean stop = false; 
+import fang.io.ReadWriter;
+
+public class TCPserver{
+	ServerSocket mServerSocket  = null;
+	int mPORT = 0;
+	ReaderList list = new ReaderList();
 	
 	public TCPserver(int PORT) {
-		mPort = PORT;
-	}
-	
-	private void setStop(boolean stop) {
-		this.stop = stop;
-	}
-	
-	@Override
-	public void run() {
-		while(!stop){
-			
+		mPORT = PORT;
+		try {
+			mServerSocket = new ServerSocket(mPORT);
+		} catch (IOException e) {
+			e.printStackTrace();
 		}
 	}
 	
-	void startService(){
-		setStop(false);
-		new Thread(this).start();
-	}
-	
-	void stopService(){
-		setStop(true);
-	}
-	
-	void closeService(){
-		if(serverSocket!=null && !serverSocket.isClosed()){
+	public void startService() {
+		boolean stop =false;
+		while(!stop){
 			try {
-				serverSocket.close();
-				serverSocket = null;
+				Socket socket = mServerSocket.accept();
+				System.out.println(socket.getInetAddress()+" connected");
+				new serverThread(socket).start();
 			} catch (IOException e) {
+				// TODO Auto-generated catch block
 				e.printStackTrace();
+				stop = true;
 			}
+			
 		}
 	}
 }
 
-class TCPServerThread extends Thread{
+class serverThread extends Thread{
+	ReadWriter reader = null;
 	Socket mSocket = null;
-	
-	public TCPServerThread(Socket socket) {
+	public serverThread(Socket socket) {
 		mSocket = socket;
 	}
 	
 	@Override
 	public void run() {
-		
+		InputStream inputStream =null;
+		try {
+			inputStream = mSocket.getInputStream();
+			reader = new ReadWriter(inputStream);
+			ReaderList.list.add(reader);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
 	}
+}
+
+class ReaderList{
+	public static List<ReadWriter> list = new LinkedList<ReadWriter>();
 }

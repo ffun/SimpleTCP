@@ -25,6 +25,7 @@ public class TCPClinet2 {
 	
 	public void setRecHandler(StringMsgHandler recHandler) {
 		mRecHandler = recHandler;
+		
 	}
 	
 	private void setActive(boolean isActive) {

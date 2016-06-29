@@ -13,60 +13,106 @@ import java.util.concurrent.LinkedBlockingQueue;
 import fang.util.CloseableInterface;
 import fang.util.StringMsgHandler;
 
+/**
+ * 1.ReadWriter is a class that contains independent thread for read and write
+ * 
+ * 2.It's suitable for no-blocking scene when reading and writing
+ * 
+ * 3.The read and write thread will be blocked when no data to improve CPU usage
+ * 
+ * 4.You can get single thread for readWriter Object through static function.
+ * In this case,it's only for read or write.It'll be a reader or writer.
+ * @author fang
+ *
+ */
 public class ReadWriter implements CloseableInterface{
 	WriteThread writeThread = null;
 	ReadThread readThread = null;
 	List<CloseableInterface> ThreadList = new LinkedList<CloseableInterface>();
 	StringMsgHandler mReceiveMsgHandler = null;
 	
-	volatile boolean isActive = false;
-	
 	public ReadWriter(InputStream in) {
-		readThread = new ReadThread(in);
-		ThreadList.add(readThread);
-		readThread.start();
+		Constructor(in, null, null);
 	}
 	
 	public ReadWriter(InputStream in,StringMsgHandler receiveHandler){
-		readThread = new ReadThread(in);
-		readThread.setMsgHandler(receiveHandler);
+		Constructor(in, null,receiveHandler);
 	}
 	
+	public ReadWriter(OutputStream out) {
+		Constructor(null, out, null);
+	}
+	
+	public ReadWriter(InputStream in,OutputStream out) {
+		Constructor(in, out, null);
+	}
+	
+	public ReadWriter(InputStream in,OutputStream out,StringMsgHandler recMsgHandler) {
+		Constructor(in, out, recMsgHandler);
+	}
+	
+	/**
+	 * the real constructor for the class
+	 * @param in
+	 * @param out
+	 * @param recMsgHandler
+	 */
+	private void Constructor(InputStream in,OutputStream out,StringMsgHandler recMsgHandler) {
+		if(null != in){
+			readThread = new ReadThread(in);
+			if (null != recMsgHandler) {
+				this.setReceiveMsgHandler(recMsgHandler);
+			}
+			ThreadList.add(readThread);
+			readThread.start();
+		}
+		if(null != out){
+			writeThread = new WriteThread(out);
+			ThreadList.add(writeThread);
+			writeThread.start();
+		}
+	}
+	
+	public static ReadWriter getReader(InputStream in) {
+		return new ReadWriter(in);
+	}
+	
+	public static ReadWriter getReader(InputStream in,StringMsgHandler recMsgHandler) {
+		return new ReadWriter(in,recMsgHandler);
+	}
+	
+	public static ReadWriter getWriter(OutputStream out) {
+		return new ReadWriter(out);
+	}
+	
+	/**
+	 * if you set recMsgHandler to readThread of ReadWriter object,
+	 * it will run when read data,handling the string msg
+	 * @param recMsgHandler
+	 */
 	public void setReceiveMsgHandler(StringMsgHandler recMsgHandler) {
+		if(null == readThread)//check readThread is not null
+			return;
 		mReceiveMsgHandler = recMsgHandler;
 		readThread.setMsgHandler(recMsgHandler);
 	}
 	
-	public ReadWriter(OutputStream out) {
-		writeThread = new WriteThread(out);
-		ThreadList.add(writeThread);
-		writeThread.start();
-	}
-	
-	public ReadWriter(InputStream in,OutputStream out) {
-		readThread = new ReadThread(in);
-		writeThread = new WriteThread(out);
-		ThreadList.add(readThread);ThreadList.add(writeThread);
-		readThread.start();writeThread.start();
-	}
-	
-	public ReadWriter(InputStream in,OutputStream out,StringMsgHandler recMsgHandler) {
-		readThread = new ReadThread(in);
-		if(null != recMsgHandler)
-			this.setReceiveMsgHandler(recMsgHandler);
-		writeThread = new WriteThread(out);
-		ThreadList.add(readThread);ThreadList.add(writeThread);
-		readThread.start();writeThread.start();
-	}
-	
+	/**
+	 * write string msg
+	 * @param msg
+	 */
 	public void write(String msg) {
 		if(writeThread.isAlive())
 			writeThread.write(msg);
 	}
 	
+	/**
+	 * write a line of msg
+	 * @param msg
+	 */
 	public void writeLine(String msg){
 		String newDate = msg+"\r\n";
-		write(newDate);
+		this.write(newDate);
 	}
 	
 	@Override
@@ -78,6 +124,12 @@ public class ReadWriter implements CloseableInterface{
 	}
 }
 
+/**
+ * write thread for writer,contains a SendingMsgQueue
+ * if the Queue is empty,block itself,else notify the thread
+ * @author fang
+ *
+ */
 class WriteThread extends Thread implements CloseableInterface{
 	Queue<String> MsgSendingQueue = new LinkedBlockingQueue<>(255);
 	OutputStream outputStream;
