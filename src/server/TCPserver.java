@@ -31,7 +31,6 @@ public class TCPserver{
 				System.out.println(socket.getInetAddress()+" connected");
 				new serverThread(socket).start();
 			} catch (IOException e) {
-				// TODO Auto-generated catch block
 				e.printStackTrace();
 				stop = true;
 			}
